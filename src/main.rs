@@ -44,7 +44,8 @@ enum VideoProcessor {
     #[default]
     SelectFile,
     SelectTarget(SelectTargetCtx),
-    GeneratingFile,
+    GeneratingMp4,
+    GeneratingGif,
     Complete(CompleteCtx),
     Error,
 }
@@ -52,7 +53,7 @@ enum VideoProcessor {
 #[derive(Debug, Clone)]
 enum Message {
     EventOccurred(Event),
-    Submit,
+    Submit(String),
     FfmpegComplete(PathBuf),
     FfmpegFound(bool),
 }
@@ -93,15 +94,15 @@ impl Application for VideoProcessor {
                 *self = VideoProcessor::SelectTarget(SelectTargetCtx { video: file_path });
                 Command::none()
             }
-            Message::Submit => {
+            Message::Submit(video_type) => {
                 let cur_ctx = if let VideoProcessor::SelectTarget(ctx) = self {
                     ctx.clone()
                 } else {
                     panic!("Wrong application state.")
                 };
 
-                *self = VideoProcessor::GeneratingFile;
-                Command::perform(ffmpeg_execute(cur_ctx.video), |path: PathBuf| {
+                *self = if video_type == "mp4" { VideoProcessor::GeneratingMp4 } else { VideoProcessor::GeneratingGif };
+                Command::perform(ffmpeg_execute(cur_ctx.video, video_type), |path: PathBuf| {
                     Message::FfmpegComplete(path)
                 })
             }
@@ -127,7 +128,8 @@ impl Application for VideoProcessor {
         match self {
             VideoProcessor::SelectFile => select_file_view(),
             VideoProcessor::SelectTarget(ctx) => select_target_view(ctx),
-            VideoProcessor::GeneratingFile => gen_file_view(),
+            VideoProcessor::GeneratingMp4 => gen_mp4_view(),
+            VideoProcessor::GeneratingGif => gen_gif_view(),
             VideoProcessor::Complete(ctx) => complete_view(&ctx.target_path),
             VideoProcessor::Error => error_view(),
         }
@@ -163,19 +165,28 @@ fn select_target_view(ctx: &SelectTargetCtx) -> Element<'static, Message> {
     ))
     .size(28);
 
-    let button = button(
+    let button_mp4 = button(
         text("MP4")
             .width(Length::Fill)
             .horizontal_alignment(alignment::Horizontal::Center),
     )
     .width(Length::Fixed(100.))
-    .on_press(Message::Submit);
+    .on_press(Message::Submit("mp4".to_string()));
+
+    let button_gif = button(
+        text("GIF")
+            .width(Length::Fill)
+            .horizontal_alignment(alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(100.))
+    .on_press(Message::Submit("gif".to_string()));
 
     let content = Column::new()
         .align_items(Alignment::Center)
         .spacing(5)
         .push(txt)
-        .push(button);
+        .push(button_mp4)
+        .push(button_gif);
 
     container(content)
         .width(Length::Fill)
@@ -185,7 +196,26 @@ fn select_target_view(ctx: &SelectTargetCtx) -> Element<'static, Message> {
         .into()
 }
 
-fn gen_file_view() -> Element<'static, Message> {
+fn gen_mp4_view() -> Element<'static, Message> {
+    let txt = text("转换中...")
+        .width(100)
+        .width(Length::Fill)
+        .horizontal_alignment(alignment::Horizontal::Center);
+
+    let content = Column::new()
+        .align_items(Alignment::Center)
+        .spacing(20)
+        .push(txt);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x()
+        .center_y()
+        .into()
+}
+
+fn gen_gif_view() -> Element<'static, Message> {
     let txt = text("转换中...")
         .width(100)
         .width(Length::Fill)
@@ -249,7 +279,7 @@ fn error_view() -> Element<'static, Message> {
         .into()
 }
 
-fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
+fn _ffmpeg_execute(src_video: PathBuf, video_type: String) -> PathBuf {
     let src_path = src_video.to_str().unwrap();
     let dst_path = {
         let filename_without_suffix = src_video
@@ -258,8 +288,8 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
             .unwrap_or("output");
 
         let dir = PathBuf::new()
-            .join(env::var("HOME").unwrap())
-            .join("Downloads/VideoConvert");
+            .join("./")
+            .join("test/dist");
 
         println!("dir: {}", dir.to_str().unwrap());
         if dir.is_file() {
@@ -268,7 +298,11 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
         if !dir.is_dir() {
             fs::create_dir(dir.clone()).expect("create dst dir failed.");
         }
-        dir.join(filename_without_suffix.to_owned() + ".mp4")
+        if video_type == "mp4" {
+            dir.join(filename_without_suffix.to_owned() + ".mp4")
+        } else {
+            dir.join(filename_without_suffix.to_owned() + ".gif")
+        }
     };
 
     if dst_path.is_file() {
@@ -276,12 +310,19 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
     }
 
     let mut command = process::Command::new("ffmpeg");
-    command
+    if video_type == "mp4" {
+        command
         .arg("-i")
         .arg(src_path)
         .arg("-vf")
         .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
         .arg(dst_path.clone());
+    } else {
+        command
+        .arg("-i")
+        .arg(src_path)
+        .arg(dst_path.clone());
+    }
 
     println!("{:?}", command);
     let result = command.output().expect("ffmpeg execute failed.");
@@ -299,11 +340,17 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
 fn test_ffmpeg_execute() {
     _ffmpeg_execute(
         PathBuf::new().join("/mnt/yjn/DATA/Videos/录屏/录屏 2023年04月17日 19时13分35秒.webm"),
+        "mp4".to_string()
     );
 }
 
-async fn ffmpeg_execute(src_video: PathBuf) -> PathBuf {
-    _ffmpeg_execute(src_video)
+async fn ffmpeg_execute(src_video: PathBuf, video_type: String) -> PathBuf {
+    if video_type == "mp4" {
+        _ffmpeg_execute(src_video, video_type)
+    } else {
+        _ffmpeg_execute(src_video, video_type)
+    }
+    
 }
 
 fn _ffmpeg_found() -> bool {
