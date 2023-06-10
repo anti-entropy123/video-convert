@@ -44,8 +44,7 @@ enum VideoProcessor {
     #[default]
     SelectFile,
     SelectTarget(SelectTargetCtx),
-    GeneratingMp4,
-    GeneratingGif,
+    GeneratingFile,
     Complete(CompleteCtx),
     Error,
 }
@@ -101,7 +100,7 @@ impl Application for VideoProcessor {
                     panic!("Wrong application state.")
                 };
 
-                *self = if video_type == "mp4" { VideoProcessor::GeneratingMp4 } else { VideoProcessor::GeneratingGif };
+                *self = VideoProcessor::GeneratingFile;
                 Command::perform(ffmpeg_execute(cur_ctx.video, video_type), |path: PathBuf| {
                     Message::FfmpegComplete(path)
                 })
@@ -128,8 +127,7 @@ impl Application for VideoProcessor {
         match self {
             VideoProcessor::SelectFile => select_file_view(),
             VideoProcessor::SelectTarget(ctx) => select_target_view(ctx),
-            VideoProcessor::GeneratingMp4 => gen_mp4_view(),
-            VideoProcessor::GeneratingGif => gen_gif_view(),
+            VideoProcessor::GeneratingFile => gen_file_view(),
             VideoProcessor::Complete(ctx) => complete_view(&ctx.target_path),
             VideoProcessor::Error => error_view(),
         }
@@ -196,26 +194,7 @@ fn select_target_view(ctx: &SelectTargetCtx) -> Element<'static, Message> {
         .into()
 }
 
-fn gen_mp4_view() -> Element<'static, Message> {
-    let txt = text("转换中...")
-        .width(100)
-        .width(Length::Fill)
-        .horizontal_alignment(alignment::Horizontal::Center);
-
-    let content = Column::new()
-        .align_items(Alignment::Center)
-        .spacing(20)
-        .push(txt);
-
-    container(content)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .center_x()
-        .center_y()
-        .into()
-}
-
-fn gen_gif_view() -> Element<'static, Message> {
+fn gen_file_view() -> Element<'static, Message> {
     let txt = text("转换中...")
         .width(100)
         .width(Length::Fill)
