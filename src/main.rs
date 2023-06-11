@@ -13,6 +13,8 @@ use iced::window::Event as WindowEvent;
 use iced::Event;
 use iced::{Alignment, Application, Command, Element, Length, Settings, Subscription, Theme};
 
+extern crate dirs;
+
 const FONT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/resource/SourceHanSansCN-Regular.otf"
@@ -50,9 +52,15 @@ enum VideoProcessor {
 }
 
 #[derive(Debug, Clone)]
+enum VideoType {
+    MP4,
+    GIF,
+}
+
+#[derive(Debug, Clone)]
 enum Message {
     EventOccurred(Event),
-    Submit,
+    Submit(VideoType),
     FfmpegComplete(PathBuf),
     FfmpegFound(bool),
 }
@@ -93,7 +101,7 @@ impl Application for VideoProcessor {
                 *self = VideoProcessor::SelectTarget(SelectTargetCtx { video: file_path });
                 Command::none()
             }
-            Message::Submit => {
+            Message::Submit(video_type) => {
                 let cur_ctx = if let VideoProcessor::SelectTarget(ctx) = self {
                     ctx.clone()
                 } else {
@@ -101,7 +109,7 @@ impl Application for VideoProcessor {
                 };
 
                 *self = VideoProcessor::GeneratingFile;
-                Command::perform(ffmpeg_execute(cur_ctx.video), |path: PathBuf| {
+                Command::perform(ffmpeg_execute(cur_ctx.video, video_type), |path: PathBuf| {
                     Message::FfmpegComplete(path)
                 })
             }
@@ -163,19 +171,28 @@ fn select_target_view(ctx: &SelectTargetCtx) -> Element<'static, Message> {
     ))
     .size(28);
 
-    let button = button(
+    let button_mp4 = button(
         text("MP4")
             .width(Length::Fill)
             .horizontal_alignment(alignment::Horizontal::Center),
     )
     .width(Length::Fixed(100.))
-    .on_press(Message::Submit);
+    .on_press(Message::Submit(VideoType::MP4));
+
+    let button_gif = button(
+        text("GIF")
+            .width(Length::Fill)
+            .horizontal_alignment(alignment::Horizontal::Center),
+    )
+    .width(Length::Fixed(100.))
+    .on_press(Message::Submit(VideoType::GIF));
 
     let content = Column::new()
         .align_items(Alignment::Center)
         .spacing(5)
         .push(txt)
-        .push(button);
+        .push(button_mp4)
+        .push(button_gif);
 
     container(content)
         .width(Length::Fill)
@@ -249,7 +266,7 @@ fn error_view() -> Element<'static, Message> {
         .into()
 }
 
-fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
+fn _ffmpeg_execute(src_video: PathBuf, video_type: VideoType) -> PathBuf {
     let src_path = src_video.to_str().unwrap();
     let dst_path = {
         let filename_without_suffix = src_video
@@ -258,8 +275,8 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
             .unwrap_or("output");
 
         let dir = PathBuf::new()
-            .join(env::var("HOME").unwrap())
-            .join("Downloads/VideoConvert");
+            .join(dirs::download_dir().unwrap())
+            .join("VideoConvert");
 
         println!("dir: {}", dir.to_str().unwrap());
         if dir.is_file() {
@@ -268,7 +285,14 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
         if !dir.is_dir() {
             fs::create_dir(dir.clone()).expect("create dst dir failed.");
         }
-        dir.join(filename_without_suffix.to_owned() + ".mp4")
+        match video_type {
+            VideoType::MP4 => {
+                dir.join(filename_without_suffix.to_owned() + ".mp4")
+            },
+            VideoType::GIF => {
+                dir.join(filename_without_suffix.to_owned() + ".gif")
+            }
+        }
     };
 
     if dst_path.is_file() {
@@ -276,12 +300,22 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
     }
 
     let mut command = process::Command::new("ffmpeg");
-    command
-        .arg("-i")
-        .arg(src_path)
-        .arg("-vf")
-        .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-        .arg(dst_path.clone());
+    match video_type {
+        VideoType::MP4 => {
+            command
+            .arg("-i")
+            .arg(src_path)
+            .arg("-vf")
+            .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+            .arg(dst_path.clone());
+        },
+        VideoType::GIF => {
+            command
+            .arg("-i")
+            .arg(src_path)
+            .arg(dst_path.clone());
+        }
+    }
 
     println!("{:?}", command);
     let result = command.output().expect("ffmpeg execute failed.");
@@ -299,11 +333,12 @@ fn _ffmpeg_execute(src_video: PathBuf) -> PathBuf {
 fn test_ffmpeg_execute() {
     _ffmpeg_execute(
         PathBuf::new().join("/mnt/yjn/DATA/Videos/录屏/录屏 2023年04月17日 19时13分35秒.webm"),
+        VideoType::MP4
     );
 }
 
-async fn ffmpeg_execute(src_video: PathBuf) -> PathBuf {
-    _ffmpeg_execute(src_video)
+async fn ffmpeg_execute(src_video: PathBuf, video_type: VideoType) -> PathBuf {
+    _ffmpeg_execute(src_video, video_type)
 }
 
 fn _ffmpeg_found() -> bool {
