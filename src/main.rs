@@ -13,8 +13,6 @@ use iced::window::Event as WindowEvent;
 use iced::Event;
 use iced::{Alignment, Application, Command, Element, Length, Settings, Subscription, Theme};
 
-extern crate dirs;
-
 const FONT: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/resource/SourceHanSansCN-Regular.otf"
@@ -54,7 +52,7 @@ enum VideoProcessor {
 #[derive(Debug, Clone)]
 enum VideoType {
     MP4,
-    GIF,
+    Gif,
 }
 
 #[derive(Debug, Clone)]
@@ -74,7 +72,7 @@ impl Application for VideoProcessor {
     fn new(_flags: ()) -> (VideoProcessor, Command<Message>) {
         (
             VideoProcessor::default(),
-            Command::perform(ffmpeg_found(), |is_exist| Message::FfmpegFound(is_exist)),
+            Command::perform(ffmpeg_found(), Message::FfmpegFound),
         )
     }
 
@@ -109,9 +107,10 @@ impl Application for VideoProcessor {
                 };
 
                 *self = VideoProcessor::GeneratingFile;
-                Command::perform(ffmpeg_execute(cur_ctx.video, video_type), |path: PathBuf| {
-                    Message::FfmpegComplete(path)
-                })
+                Command::perform(
+                    ffmpeg_execute(cur_ctx.video, video_type),
+                    Message::FfmpegComplete,
+                )
             }
             Message::FfmpegComplete(p) => {
                 *self = VideoProcessor::Complete(CompleteCtx { target_path: p });
@@ -185,7 +184,7 @@ fn select_target_view(ctx: &SelectTargetCtx) -> Element<'static, Message> {
             .horizontal_alignment(alignment::Horizontal::Center),
     )
     .width(Length::Fixed(100.))
-    .on_press(Message::Submit(VideoType::GIF));
+    .on_press(Message::Submit(VideoType::Gif));
 
     let content = Column::new()
         .align_items(Alignment::Center)
@@ -274,9 +273,13 @@ fn _ffmpeg_execute(src_video: PathBuf, video_type: VideoType) -> PathBuf {
             .map(|name| name.to_str().expect("bad file path"))
             .unwrap_or("output");
 
+        #[cfg(target_os = "linux")]
         let dir = PathBuf::new()
-            .join(dirs::download_dir().unwrap())
-            .join("VideoConvert");
+            .join(env::var("HOME").unwrap())
+            .join("Downloads/VideoConvert");
+        
+        #[cfg(not(target_os = "linux"))]
+        let dir = dirs::download_dir().unwrap().join("VideoConvert");
 
         println!("dir: {}", dir.to_str().unwrap());
         if dir.is_file() {
@@ -286,12 +289,8 @@ fn _ffmpeg_execute(src_video: PathBuf, video_type: VideoType) -> PathBuf {
             fs::create_dir(dir.clone()).expect("create dst dir failed.");
         }
         match video_type {
-            VideoType::MP4 => {
-                dir.join(filename_without_suffix.to_owned() + ".mp4")
-            },
-            VideoType::GIF => {
-                dir.join(filename_without_suffix.to_owned() + ".gif")
-            }
+            VideoType::MP4 => dir.join(filename_without_suffix.to_owned() + ".mp4"),
+            VideoType::Gif => dir.join(filename_without_suffix.to_owned() + ".gif"),
         }
     };
 
@@ -303,17 +302,14 @@ fn _ffmpeg_execute(src_video: PathBuf, video_type: VideoType) -> PathBuf {
     match video_type {
         VideoType::MP4 => {
             command
-            .arg("-i")
-            .arg(src_path)
-            .arg("-vf")
-            .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-            .arg(dst_path.clone());
-        },
-        VideoType::GIF => {
-            command
-            .arg("-i")
-            .arg(src_path)
-            .arg(dst_path.clone());
+                .arg("-i")
+                .arg(src_path)
+                .arg("-vf")
+                .arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+                .arg(dst_path.clone());
+        }
+        VideoType::Gif => {
+            command.arg("-i").arg(src_path).arg(dst_path.clone());
         }
     }
 
@@ -333,7 +329,7 @@ fn _ffmpeg_execute(src_video: PathBuf, video_type: VideoType) -> PathBuf {
 fn test_ffmpeg_execute() {
     _ffmpeg_execute(
         PathBuf::new().join("/mnt/yjn/DATA/Videos/录屏/录屏 2023年04月17日 19时13分35秒.webm"),
-        VideoType::MP4
+        VideoType::MP4,
     );
 }
 
